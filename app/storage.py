@@ -1,9 +1,13 @@
 """Durable evidence store keyed by the stable audit identifier.
 
-Each submission's exact bytes are hashed (SHA-256).  Semantic equivalence of
-a retransmission is judged on canonicalised JSON (key order independent); a
-same-id payload whose canonical content differs is a conflict: the original
-verdict and evidence are retained and the conflict is reported.
+A submission's *semantic content* is hashed (SHA-256 over canonicalised JSON).
+The API accepts two equivalent envelopes -- ``{"model": {...}, "events": [...]}``
+and the flat form with the model fields at the top level -- and both normalise
+to the same parsed model/capture, so they hash identically.  Rational spellings
+(1, 0.5, "1/2") are normalised as well.  A same-id submission whose semantic
+content differs is a conflict: the original verdict and evidence are retained
+and the conflict is reported.  Submissions whose model cannot be parsed fall
+back to hashing the raw envelope.
 """
 
 from __future__ import annotations
@@ -40,18 +44,34 @@ class Store:
                                sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
+    @classmethod
+    def content_fingerprint(cls, model: Any = None,
+                            events: Any = None) -> str:
+        """Hash the parsed semantic content, envelope-independent.
+
+        The nested and flat request representations parse to the same
+        ``(model, events)`` pair and therefore share one fingerprint; key order,
+        whitespace and rational spellings are irrelevant.
+        """
+        return cls.fingerprint({"model": model, "events": events})
+
     def lookup(self, audit_id: str) -> dict[str, Any] | None:
         with _LOCK:
             rec = self._data.get(audit_id)
             return json.loads(json.dumps(rec)) if rec else None
 
     def submit(self, audit_id: str, payload: Any, result: dict[str, Any],
-               model_valid: bool) -> dict[str, Any]:
+               model_valid: bool,
+               content: Any | None = None) -> dict[str, Any]:
         """Persist or reconcile a submission.
 
+        Fingerprinting uses the parsed semantic ``content`` when supplied
+        (nested and flat envelopes of the same review then coincide); the raw
+        ``payload`` is only hashed for submissions that could not be parsed.
         Returns the response body including replay/conflict annotations.
         """
-        fp = self.fingerprint(payload)
+        fp = (self.content_fingerprint(**content) if content is not None
+              else self.fingerprint(payload))
         with _LOCK:
             prior = self._data.get(audit_id)
             if prior is not None:

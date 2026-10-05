@@ -720,6 +720,40 @@ def witness_to_names(model: Model, vals: dict[int, Fraction]
     return {model.clocks[ci]: frac_out(v) for ci, v in vals.items()}
 
 
+# ---- semantic normalisation -------------------------------------------------
+#
+# The API accepts two equivalent envelopes (a nested "model" object or the same
+# model fields at the top level) and several rational spellings (1, 0.5, "1/2").
+# The serializers below render the *parsed* model/capture to one canonical form
+# so that semantically identical submissions share one evidence fingerprint.
+
+def model_to_dict(model: Model) -> dict[str, Any]:
+    return {
+        "audit_id": model.audit_id,
+        "locations": list(model.locations),
+        "clocks": list(model.clocks),
+        "initial_location": model.locations[model.initial],
+        "final_locations": [model.locations[i] for i in
+                            sorted(model.finals)],
+        "transitions": [
+            {"id": t.id,
+             "source": model.locations[t.source],
+             "target": model.locations[t.target],
+             "event": t.event,
+             "guards": [{"clock": model.clocks[g.clock],
+                         "lower": rat_text(g.lo), "upper": rat_text(g.hi)}
+                        for g in sorted(t.guards, key=lambda g: g.clock)],
+             "resets": [model.clocks[c] for c in sorted(t.resets)]}
+            for t in sorted(model.transitions, key=lambda t: t.raw_index)],
+    }
+
+
+def events_to_list(events: Iterable[EventWindow]) -> list[dict[str, Any]]:
+    return [{"event": w.event, "lower": rat_text(w.lo),
+             "upper": rat_text(w.hi)}
+            for w in sorted(events, key=lambda w: w.raw_index)]
+
+
 # ---- review -----------------------------------------------------------------
 
 @dataclass

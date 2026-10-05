@@ -1,6 +1,7 @@
 """HTTP API tests: verdicts, replay, conflict, invalid model, health."""
 
 import importlib
+import json
 import os
 import tempfile
 
@@ -90,6 +91,93 @@ def test_semantic_equivalent_retransmission_replays(client):
     # same verdict/evidence content
     assert b2["reason"] == b1["reason"]
     assert b2["earliest_event_index"] == b1["earliest_event_index"]
+
+
+FLAT_MODEL = {
+    "audit_id": "API-FLAT",
+    "locations": ["init", "done"],
+    "clocks": ["x"],
+    "initial_location": "init",
+    "final_locations": ["done"],
+    "transitions": [
+        {"id": "t_go", "source": "init", "target": "done", "event": "go",
+         "guards": [{"clock": "x", "lower": 0, "upper": 1}], "resets": []},
+    ],
+}
+
+FLAT_EVENTS = [{"event": "go", "relative_lower": 0, "relative_upper": 1}]
+
+
+def nested_payload(model, events):
+    return {"model": model, "events": events}
+
+
+def flat_payload(model, events):
+    return {**model, "events": events}
+
+
+def test_nested_then_flat_retransmission_replays(client):
+    # Same audit id, same parsed model/events; only the envelope differs.
+    r1 = client.post("/api/reviews",
+                     json=nested_payload(FLAT_MODEL, FLAT_EVENTS))
+    assert r1.status_code == 200
+    b1 = r1.json()
+    assert b1["status"] == "frozen"
+
+    r2 = client.post("/api/reviews",
+                     json=flat_payload(FLAT_MODEL, FLAT_EVENTS))
+    assert r2.status_code == 200
+    b2 = r2.json()
+    assert b2["status"] == "frozen"
+    assert b2["replay"]["semantically_equivalent_retransmission"] is True
+    assert b2["replay"]["replayed_verdict"] is True
+    assert b2["replay"]["original_fingerprint"] == \
+        b1["stored"]["fingerprint"]
+
+
+def test_flat_then_nested_retransmission_replays(client):
+    r1 = client.post("/api/reviews",
+                     json=flat_payload(FLAT_MODEL, FLAT_EVENTS))
+    assert r1.status_code == 200
+    r2 = client.post("/api/reviews",
+                     json=nested_payload(FLAT_MODEL, FLAT_EVENTS))
+    assert r2.status_code == 200
+    assert r2.json()["replay"]["replayed_verdict"] is True
+
+
+def test_nested_flat_rational_spellings_share_fingerprint(client):
+    model = json.loads(json.dumps(FLAT_MODEL))
+    model["audit_id"] = "API-FLAT-RAT"
+    model["transitions"][0]["guards"][0] = {"clock": "x", "lower": "0/1",
+                                            "upper": "10/10"}
+    events = [{"event": "go", "relative_lower": 0.0,
+               "relative_upper": "1"}]
+    r1 = client.post("/api/reviews",
+                     json=nested_payload(model, events))
+    assert r1.status_code == 200
+    fp1 = r1.json()["stored"]["fingerprint"]
+    r2 = client.post("/api/reviews",
+                     json=flat_payload(FLAT_MODEL | {"audit_id": "API-FLAT-RAT"},
+                                       FLAT_EVENTS))
+    assert r2.status_code == 200
+    b2 = r2.json()
+    assert b2["replay"]["replayed_verdict"] is True
+    assert b2["replay"]["original_fingerprint"] == fp1
+
+
+def test_flat_envelope_real_content_change_still_conflicts(client):
+    r1 = client.post("/api/reviews",
+                     json=nested_payload(FLAT_MODEL, FLAT_EVENTS))
+    assert r1.status_code == 200
+    changed = {**FLAT_MODEL}
+    changed["clocks"] = ["z"]
+    changed["transitions"] = [
+        {"id": "t_go", "source": "init", "target": "done", "event": "go",
+         "guards": [{"clock": "z", "lower": 0, "upper": 1}], "resets": []}]
+    r2 = client.post("/api/reviews",
+                     json=flat_payload(changed, FLAT_EVENTS))
+    assert r2.status_code == 409
+    assert r2.json()["status"] == "conflict"
 
 
 def test_same_id_different_content_conflicts_and_keeps_original(client):

@@ -7,6 +7,8 @@ Covers, over the real network API:
     clock witness and blocking guards,
   * an illegal model (closed guards touching/overlapping) -> 422,
   * a semantically equivalent retransmission -> same verdict replayed,
+  * the same audit submitted first nested ({"model": ...}) then flat (model
+    fields at the top level) -> the second submission replays with HTTP 200,
   * a same-id different-content submission -> 409 conflict, original kept.
 Exits 0 on full success, 1 otherwise.
 """
@@ -126,6 +128,43 @@ def main(base: str) -> int:
               "semantically_equivalent_retransmission")))
     check("same verdict", b2.get("status") == b1.get("status")
           and b2.get("reason") == b1.get("reason"))
+
+    print("== nested then flat envelope: flat retransmission replays ==")
+    flat_model = {
+        "audit_id": "SMOKE-FLAT",
+        "locations": ["init", "done"],
+        "clocks": ["x"],
+        "initial_location": "init",
+        "final_locations": ["done"],
+        "transitions": [
+            {"id": "t_go", "source": "init", "target": "done",
+             "event": "go",
+             "guards": [{"clock": "x", "lower": 0, "upper": 1}],
+             "resets": []}],
+    }
+    flat_events = [
+        {"event": "go", "relative_lower": 0, "relative_upper": 1}]
+    # first submission: nested representation
+    s1, b1 = call("POST", f"{base}/api/reviews",
+                  {"model": flat_model, "events": flat_events})
+    check("nested first 200", s1 == 200, f"status={s1}")
+    check("nested first frozen", b1.get("status") == "frozen",
+          b1.get("reason", ""))
+    # second submission: identical model fields/events, flat representation
+    flat_body = dict(flat_model)
+    flat_body["events"] = flat_events
+    s2, b2 = call("POST", f"{base}/api/reviews", flat_body)
+    check("flat retry 200", s2 == 200, f"status={s2}")
+    check("flat retry replays verdict",
+          b2.get("replay", {}).get("replayed_verdict") is True,
+          str(b2.get("status")))
+    check("flat retry marked equivalent",
+          b2.get("replay", {}).get(
+              "semantically_equivalent_retransmission") is True)
+    check("flat retry same verdict", b2.get("status") == "frozen")
+    check("flat retry same evidence",
+          b2.get("replay", {}).get("original_fingerprint")
+          == b1.get("stored", {}).get("fingerprint"))
 
     print("== same id, different content -> conflict, evidence retained ==")
     conflict_events = [

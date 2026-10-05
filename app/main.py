@@ -9,7 +9,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .engine import ModelError, parse_capture, parse_model, review
+from .engine import (ModelError, events_to_list, model_to_dict,
+                     parse_capture, parse_model, review)
 from .storage import Store
 
 STORE_PATH = os.environ.get("EVIDENCE_STORE", "/data/evidence.json")
@@ -71,7 +72,10 @@ def _run(payload: Any) -> tuple[dict[str, Any], int]:
         return body, 422
 
     result = review(model, events)
-    stored = store.submit(model.audit_id, payload, result, model_valid=True)
+    content = {"model": model_to_dict(model),
+               "events": events_to_list(events)}
+    stored = store.submit(model.audit_id, payload, result, model_valid=True,
+                          content=content)
     code = 409 if stored.get("status") == "conflict" else 200
     return stored, code
 

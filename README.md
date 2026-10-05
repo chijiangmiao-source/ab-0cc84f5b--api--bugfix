@@ -16,6 +16,8 @@
   并给出一组可代入核对的**有理数时钟取值**与**阻断守卫**。
 - 以稳定审计标识 `audit_id` 留存证据：
   - 同标识**语义等价重传**（规范化 JSON 指纹相同）→ 回放原结论；
+    嵌套表示 `{"model": {...}, "events": [...]}` 与模型字段置于顶层、
+    与 `events` 并列的扁平表示解析结果一致，视为同一次重传；
   - 同标识**内容不同** → 返回 `409 conflict`，**保留原证据**并报告冲突。
 
 ### 精确性实现要点
@@ -35,7 +37,7 @@ app/engine.py    精确区域复核引擎（模型解析、校验、区域传播
 app/storage.py   审计标识证据留存（规范化指纹、重放、冲突）
 app/main.py      FastAPI：/api/reviews、/api/reviews/{id}、/health、页面
 app/static/      复核页面（结论 + 逐事件区域证据）
-tests/           31 项规则/API/差分不变量测试
+tests/           35 项规则/API/差分不变量测试
 verify/          verify 容器入口脚本与 HTTP 冒烟
 Dockerfile, docker-compose.yml
 ```
@@ -65,7 +67,8 @@ docker compose up --build --exit-code-from verify verify
 ```
 
 冒烟覆盖：合法重叠抖动时窗冻结、冷却区间缺口（见证 `9/2`、阻断守卫）、
-非法重叠模型（422）、语义等价重传回放、同标识改内容冲突（409 且原证据保留）。
+非法重叠模型（422）、语义等价重传回放、先嵌套后扁平的连续提交回放、
+同标识改内容冲突（409 且原证据保留）。
 
 ## 本地运行（无 Docker）
 
