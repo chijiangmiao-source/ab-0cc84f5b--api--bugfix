@@ -1,0 +1,37 @@
+services:
+  reviewer:
+    build: .
+    image: interlock-reviewer:latest
+    environment:
+      # Configurable host port is published below; health response text is
+      # configurable here.
+      HEALTH_ACK: "ok"
+      EVIDENCE_STORE: /data/evidence.json
+    ports:
+      # Host port is configurable: HOST_PORT=9090 docker compose up
+      - "${HOST_PORT:-8080}:8080"
+    volumes:
+      - evidence-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  verify:
+    image: interlock-reviewer:latest
+    depends_on:
+      reviewer:
+        condition: service_healthy
+    environment:
+      EVIDENCE_STORE: /tmp/evidence.json
+      TARGET_URL: "http://reviewer:8080"
+      HEALTH_ACK: "ok"
+    volumes:
+      - ./tests:/srv/tests:ro
+      - ./pytest.ini:/srv/pytest.ini:ro
+    entrypoint: ["/srv/verify/run_tests.sh"]
+    restart: "no"
+
+volumes:
+  evidence-data:

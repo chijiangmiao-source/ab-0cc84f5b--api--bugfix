@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>星载推进剂隔离装置 · 联锁捕获复核</title>
+<style>
+  :root { --bg:#0f1419; --panel:#171e26; --line:#2a3542; --fg:#d8e0e8;
+          --muted:#8a99a8; --ok:#3fb950; --bad:#f85149; --warn:#d29922;
+          --accent:#58a6ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.55 "Segoe UI",system-ui,sans-serif;
+         background:var(--bg); color:var(--fg); }
+  header { padding:18px 28px; border-bottom:1px solid var(--line);
+           background:#12181f; }
+  header h1 { margin:0 0 4px; font-size:18px; }
+  header p { margin:0; color:var(--muted); font-size:12.5px; }
+  main { display:grid; grid-template-columns: 430px 1fr; gap:0;
+         min-height: calc(100vh - 64px); }
+  .pane { padding:20px 24px; overflow:auto; }
+  .pane:first-child { border-right:1px solid var(--line); background:var(--panel);}
+  label { display:block; font-size:12px; color:var(--muted); margin:12px 0 4px;}
+  input,textarea,select { width:100%; background:#0d1218; color:var(--fg);
+          border:1px solid var(--line); border-radius:6px; padding:8px 10px;
+          font:inherit; }
+  textarea { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;
+             min-height:260px; resize:vertical; white-space:pre; }
+  .row { display:flex; gap:10px; align-items:center; }
+  .row > * { flex:1; }
+  button { margin-top:14px; background:var(--accent); color:#08111c;
+           border:0; border-radius:6px; padding:10px 18px; font-weight:600;
+           cursor:pointer; }
+  button.secondary { background:#2a3542; color:var(--fg); }
+  .limits { font-size:11.5px; color:var(--muted); margin-top:6px; }
+  .verdict { border-radius:8px; padding:14px 16px; margin:12px 0 18px;
+             border:1px solid var(--line); }
+  .verdict.frozen { border-color:var(--ok); background:#0f2417; }
+  .verdict.rejected { border-color:var(--bad); background:#2a1414; }
+  .verdict.invalid_model { border-color:var(--warn); background:#2a2110; }
+  .verdict.conflict { border-color:var(--warn); background:#2a2110; }
+  .verdict h2 { margin:0 0 6px; font-size:15px; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:10px;
+         font-size:11px; font-weight:700; letter-spacing:.04em; }
+  .tag.frozen{background:var(--ok);color:#08130c}
+  .tag.rejected{background:var(--bad);color:#fff}
+  .tag.invalid_model,.tag.conflict{background:var(--warn);color:#1c1303}
+  .evidence-box { background:#0c1116; border:1px solid var(--line);
+             border-radius:8px; padding:10px 14px; margin:8px 0;
+             font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;}
+  details { margin:10px 0; border:1px solid var(--line); border-radius:8px;
+            background:var(--panel); }
+  summary { cursor:pointer; padding:10px 14px; font-weight:600; }
+  details[open] summary { border-bottom:1px solid var(--line); }
+  .step-body { padding:10px 14px; }
+  table { border-collapse:collapse; width:100%; font-size:12px; margin:6px 0;}
+  th,td { border:1px solid var(--line); padding:4px 8px; text-align:left;
+          vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  .muted { color:var(--muted); }
+  .fail { color:var(--bad); font-weight:600; }
+  code { background:#0d1218; padding:1px 5px; border-radius:4px; }
+  .pill { font-size:11px; color:var(--muted); margin-left:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>星载推进剂隔离装置 · 联锁捕获复核台</h1>
+  <p>精确有理数区域传播（差分边界矩阵） · 闭区间守卫/时窗 · 复位集合 · 终态全覆盖 · 稳定审计标识证据留存</p>
+</header>
+<main>
+  <section class="pane">
+    <label>稳定审计标识（audit_id）</label>
+    <input id="auditId" value="ISO-DEMO-0001"/>
+    <div class="row">
+      <div>
+        <label>位置（≤8，逗号分隔，首个非必须；终态在 JSON 中指定）</label>
+        <input id="locInput" value="armed, cooling, open, done"/>
+      </div>
+      <div>
+        <label>时钟（≤4，逗号分隔）</label>
+        <input id="clkInput" value="x, y"/>
+      </div>
+    </div>
+    <div class="row">
+      <div><label>初始位置</label><input id="initInput" value="armed"/></div>
+      <div><label>终态（逗号分隔）</label><input id="finalInput" value="done"/></div>
+    </div>
+
+    <label>迁移（≤16；id / source / target / event / 闭区间守卫 / 复位集合）</label>
+    <textarea id="trInput" style="min-height:180px">[
+ {"id":"t_cooldown","source":"armed","target":"cooling","event":"cmd",
+  "guards":[{"clock":"x","lower":0,"upper":4}],"resets":["y"]},
+ {"id":"t_open","source":"armed","target":"open","event":"cmd",
+  "guards":[{"clock":"x","lower":5,"upper":10}],"resets":["y"]},
+ {"id":"t_ack_c","source":"cooling","target":"done","event":"ack",
+  "guards":[{"clock":"y","lower":1,"upper":3}],"resets":[]},
+ {"id":"t_ack_o","source":"open","target":"done","event":"ack",
+  "guards":[{"clock":"y","lower":1,"upper":3}],"resets":[]}
+]</textarea>
+
+    <label>捕获事件（≤32，按到达顺序；相对时刻为闭区间）</label>
+    <textarea id="evInput" style="min-height:130px">[
+ {"event":"cmd","relative_lower":4,"relative_upper":6},
+ {"event":"ack","relative_lower":2,"relative_upper":2}
+]</textarea>
+    <div class="limits">所有下界/上界接受整数、小数或分数字符串（如 "9/2"）；守卫与时窗均为闭区间；同位置同事件守卫闭区间不得重叠。</div>
+    <div class="row">
+      <button id="submitBtn">提交复核</button>
+      <button id="exampleGap" class="secondary" type="button">冷却缺口示例</button>
+      <button id="exampleOk" class="secondary" type="button">合法重叠时窗示例</button>
+    </div>
+    <div class="row">
+      <button id="replayBtn" class="secondary" type="button">同标识重放</button>
+      <button id="conflictBtn" class="secondary" type="button">同标识改内容</button>
+    </div>
+  </section>
+
+  <section class="pane" id="resultPane">
+    <p class="muted">提交后在此展示冻结结论、最早问题事件、可代入时钟取值、阻断守卫与逐事件区域证据。</p>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function splitList(s){ return s.split(",").map(x=>x.trim()).filter(Boolean); }
+function parseJson(txt, label){
+  try { return JSON.parse(txt); }
+  catch(e){ throw new Error(label + " 不是合法 JSON: " + e.message); }
+}
+
+function buildPayload(){
+  const model = {
+    audit_id: $("auditId").value.trim(),
+    locations: splitList($("locInput").value),
+    clocks: splitList($("clkInput").value),
+    initial_location: $("initInput").value.trim(),
+    final_locations: splitList($("finalInput").value),
+    transitions: parseJson($("trInput").value, "迁移"),
+  };
+  return { model, events: parseJson($("evInput").value, "事件") };
+}
+
+const GAP = {
+  ev: [
+    {"event":"cmd","relative_lower":4,"relative_upper":6},
+    {"event":"ack","relative_lower":2,"relative_upper":2}
+  ]
+};
+const OK = {
+  ev: [
+    {"event":"cmd","relative_lower":5,"relative_upper":10},
+    {"event":"ack","relative_lower":1,"relative_upper":3}
+  ]
+};
+$("exampleGap").onclick = ()=>{ $("evInput").value=JSON.stringify(GAP.ev,null,1); };
+$("exampleOk").onclick = ()=>{ $("evInput").value=JSON.stringify(OK.ev,null,1); };
+
+async function submit(payload){
+  const r = await fetch("/api/reviews",{method:"POST",
+    headers:{"content-type":"application/json"},
+    body: JSON.stringify(payload)});
+  return r.json();
+}
+$("submitBtn").onclick = async ()=>{
+  let payload;
+  try { payload = buildPayload(); }
+  catch(e){ renderLocalError(e.message); return; }
+  render(await submit(payload));
+};
+$("replayBtn").onclick = async ()=>{
+  let payload; try { payload = buildPayload(); }
+  catch(e){ renderLocalError(e.message); return; }
+  render(await submit(payload));
+};
+$("conflictBtn").onclick = async ()=>{
+  let payload; try { payload = buildPayload(); }
+  catch(e){ renderLocalError(e.message); return; }
+  // flip one bound to create same-id different-content submission
+  payload.events[0].relative_upper += 1;
+  render(await submit(payload));
+};
+
+function renderLocalError(msg){
+  $("resultPane").innerHTML =
+   `<div class="verdict invalid_model"><h2>本地输入错误</h2><div>${esc(msg)}</div></div>`;
+}
+function esc(s){ return String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+function frac(f){ if(!f) return ""; return f.text + ` <span class="muted">(${f.decimal})</span>`; }
+
+function clockValues(cv){
+  if(!cv) return "";
+  return Object.entries(cv).map(([k,v])=>`<tr><td><code>${esc(k)}</code></td><td>${frac(v)}</td></tr>`).join("");
+}
+function zoneTable(zones){
+  if(!zones || !zones.length) return '<div class="muted">（空）</div>';
+  return zones.map(z=>`
+    <div class="evidence-box">
+      <div>位置：<b>${esc(z.location)}</b></div>
+      <div class="muted">区域差分约束（x0=t0=0）：</div>
+      ${(z.zone_constraints||[]).map(c=>
+        `<div>${esc(c.lhs)} ${c.op} ${frac(c.bound)}</div>`).join("")||'<div class="muted">无界</div>'}
+      <div class="muted">可代入取值：</div>
+      <table><tbody>${clockValues(z.sample_clock_values)}</tbody></table>
+    </div>`).join("");
+}
+
+function render(res){
+  const status = res.status || "unknown";
+  let html = `<div class="verdict ${esc(status)}">
+    <h2><span class="tag ${esc(status)}">${esc(status.toUpperCase())}</span>
+    <span class="pill">audit_id: ${esc(res.audit_id||"")}</span></h2>
+    <div>${esc(res.reason||res.message||"")}</div>`;
+  if(res.earliest_event_index!==null && res.earliest_event_index!==undefined)
+    html += `<div class="fail">最早问题事件下标：${res.earliest_event_index}</div>`;
+  if(res.replay) html += `<div class="muted">语义等价重传：回放原结论（指纹 ${esc(res.replay.original_fingerprint.slice(0,12))}…）</div>`;
+  if(res.stored) html += `<div class="muted">已留存证据，指纹 ${esc(res.stored.fingerprint.slice(0,12))}…</div>`;
+  html += `</div>`;
+
+  if(res.failure){
+    const f = res.failure;
+    html += `<details open><summary>阻断证据 ${esc(f.kind||"")}</summary><div class="step-body">
+      <div>事件：<code>${esc(f.event)}</code>（下标 ${f.event_index}） · 位置：<b>${esc(f.location)}</b></div>
+      <div class="muted">可代入时钟取值：</div>
+      <table><tbody>${clockValues(f.clock_values)}</tbody></table>`;
+    if(f.blocking_guards && f.blocking_guards.length){
+      html += `<div class="muted">阻断/候选守卫：</div><table><thead><tr><th>迁移</th><th>守卫（闭区间）</th></tr></thead><tbody>`+
+        f.blocking_guards.map(g=>`<tr><td>${esc(g.transition)}</td><td>${g.guards.map(esc).join("<br>")}</td></tr>`).join("")+
+        `</tbody></table>`;
+    }
+    html += `</div></details>`;
+  }
+  if(res.error && res.error.details && res.error.details.clock_values){
+    const d = res.error.details;
+    html += `<details open><summary>非法模型 · 重叠守卫见证</summary><div class="step-body">
+      <div>位置 <b>${esc(d.location)}</b> 事件 <code>${esc(d.event)}</code>：
+      迁移 ${esc(d.transition_a)} 与 ${esc(d.transition_b)}</div>
+      <div>${(d.guards_a||[]).map(esc).join("；")}</div>
+      <div>${(d.guards_b||[]).map(esc).join("；")}</div>
+      <table><tbody>${clockValues(d.clock_values)}</tbody></table></div></details>`;
+  }
+  if(res.conflict){
+    html += `<details open><summary>同标识冲突 · 原证据保留</summary><div class="step-body">
+      <div>原指纹：${esc(res.conflict.original_fingerprint)}</div>
+      <div>新指纹：${esc(res.conflict.incoming_fingerprint)}</div>
+      <div>原结论：<b>${esc(res.conflict.original_status)}</b></div></div></details>`;
+  }
+
+  if(res.steps && res.steps.length){
+    html += `<h3>逐事件区域证据</h3>`;
+    res.steps.forEach((s,i)=>{
+      const open = (res.earliest_event_index===i) ? " open" : "";
+      html += `<details${open}><summary>事件[${s.event_index}] <code>${esc(s.event)}</code>`+
+        (s.relative_window?` <span class="pill">相对闭区间 [${frac(s.relative_window.lower)}, ${frac(s.relative_window.upper)}]</span>`:"")+
+        (s.failure?` <span class="fail">← 最早阻断点</span>`:"")+`</summary>
+        <div class="step-body">
+          <div class="muted">事件前区域（复位后）：</div>${zoneTable(s.pre_zones)}
+          <div class="muted">时间推进后区域：</div>${zoneTable(s.post_elapse_zones)}
+          <div class="muted">守卫切分与迁移（含复位后区域）：</div>`;
+      if(!s.branches.length) html += '<div class="fail">无启用迁移</div>';
+      s.branches.forEach(b=>{
+        html += `<div class="evidence-box">
+          <div><b>${esc(b.transition)}</b>：${esc(b.source)} → ${esc(b.target)}</div>
+          <div>守卫：${b.guards.map(esc).join("；")||"（无）"} · 复位：{${b.resets.map(esc).join(", ")||""}}</div>
+          <div class="muted">守卫命中区域：</div>
+          ${(b.guard_zone||[]).map(c=>`<div>${esc(c.lhs)} ${c.op} ${frac(c.bound)}</div>`).join("")||'<div class="muted">无界</div>'}
+          <div class="muted">复位后区域取值：</div>
+          <table><tbody>${clockValues(b.sample_post_reset)}</tbody></table>
+        </div>`;
+      });
+      html += `</div></details>`;
+    });
+  }
+  if(res.final_states){
+    html += `<details open><summary>最终区域</summary><div class="step-body">${zoneTable(res.final_states)}</div></details>`;
+  }
+  $("resultPane").innerHTML = html;
+}
+</script>
+</body>
+</html>
