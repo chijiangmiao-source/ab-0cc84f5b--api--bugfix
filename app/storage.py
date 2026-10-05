@@ -1,9 +1,13 @@
 """Durable evidence store keyed by the stable audit identifier.
 
-Each submission's exact bytes are hashed (SHA-256).  Semantic equivalence of
-a retransmission is judged on canonicalised JSON (key order independent); a
-same-id payload whose canonical content differs is a conflict: the original
-verdict and evidence are retained and the conflict is reported.
+Each submission's representation-normalised content is hashed (SHA-256):
+callers first unify the nested (``{"model": {...}, "events": [...]}``) and
+flat (``{...model fields..., "events": [...]}``) wrappers into the same
+canonical shape, so the two equivalent encodings of one audit hash alike.
+Semantic equivalence of a retransmission is then judged on canonicalised JSON
+(key order independent); a same-id payload whose canonical content differs is
+a conflict: the original verdict and evidence are retained and the conflict is
+reported.
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ class Store:
 
     @staticmethod
     def fingerprint(payload: Any) -> str:
+        """SHA-256 of canonical JSON over representation-normalised content."""
         canonical = json.dumps(payload, ensure_ascii=False,
                                sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

@@ -7,6 +7,8 @@ Covers, over the real network API:
     clock witness and blocking guards,
   * an illegal model (closed guards touching/overlapping) -> 422,
   * a semantically equivalent retransmission -> same verdict replayed,
+  * a nested-then-flat retransmission (same model/capture, different wrapper)
+    -> both 200, the second replaying the first verdict,
   * a same-id different-content submission -> 409 conflict, original kept.
 Exits 0 on full success, 1 otherwise.
 """
@@ -126,6 +128,49 @@ def main(base: str) -> int:
               "semantically_equivalent_retransmission")))
     check("same verdict", b2.get("status") == b1.get("status")
           and b2.get("reason") == b1.get("reason"))
+
+    print("== nested then flat encoding: same audit replays, never conflicts ==")
+    # Fresh audit id: two locations, one clock, a single transition guarded by
+    # t in [0, 1] from the initial to the final location; one event with the
+    # [0, 1] relative window freezes.
+    flat_model = {
+        "audit_id": "SMOKE-FLAT",
+        "locations": ["init", "final"],
+        "clocks": ["t"],
+        "initial_location": "init",
+        "final_locations": ["final"],
+        "transitions": [
+            {"id": "go", "source": "init", "target": "final", "event": "fire",
+             "guards": [{"clock": "t", "lower": 0, "upper": 1}],
+             "resets": []}],
+    }
+    flat_events = [{"event": "fire", "relative_lower": 0,
+                    "relative_upper": 1}]
+    # first submission: nested representation (model under "model")
+    s_nested, b_nested = call("POST", f"{base}/api/reviews",
+                              {"model": flat_model, "events": flat_events})
+    check("nested first 200", s_nested == 200, f"status={s_nested}")
+    check("nested frozen", b_nested.get("status") == "frozen",
+          b_nested.get("reason", ""))
+    check("nested stored fingerprint",
+          bool(b_nested.get("stored", {}).get("fingerprint")))
+    # second submission: flat representation, same model fields and events
+    s_flat, b_flat = call(
+        "POST", f"{base}/api/reviews",
+        {**flat_model, "events": flat_events})
+    check("flat second 200", s_flat == 200, f"status={s_flat}")
+    check("flat replay verdict",
+          b_flat.get("replay", {}).get("replayed_verdict") is True,
+          str(b_flat.get("replay")))
+    check("flat equivalent retransmission",
+          b_flat.get("replay", {}).get(
+              "semantically_equivalent_retransmission") is True)
+    check("flat replays original fingerprint",
+          b_flat.get("replay", {}).get("original_fingerprint")
+          == b_nested.get("stored", {}).get("fingerprint"))
+    check("flat not a conflict", b_flat.get("status") != "conflict"
+          and "conflict" not in b_flat)
+    check("flat verdict frozen", b_flat.get("status") == "frozen")
 
     print("== same id, different content -> conflict, evidence retained ==")
     conflict_events = [

@@ -35,6 +35,23 @@ def _invalid_model(exc: ModelError, audit_id: str | None) -> dict[str, Any]:
     return body
 
 
+def _split_payload(payload: dict[str, Any]
+                   ) -> tuple[Any, Any, dict[str, Any]]:
+    """Extract (model, events) and unify the two request representations.
+
+    The nested form places the model under ``model``; the flat form carries the
+    same model fields at the top level alongside ``events``.  Both are returned
+    together with a canonical submission ``{"model": ..., "events": ...}`` so
+    that equivalent encodings hash identically for replay/conflict purposes.
+    """
+    model_payload = payload.get("model")
+    if model_payload is None:
+        model_payload = {k: v for k, v in payload.items() if k != "events"}
+    events_payload = payload.get("events")
+    canonical = {"model": model_payload, "events": events_payload}
+    return model_payload, events_payload, canonical
+
+
 def _run(payload: Any) -> tuple[dict[str, Any], int]:
     if not isinstance(payload, dict):
         return {"status": "invalid_model", "earliest_event_index": None,
@@ -42,10 +59,7 @@ def _run(payload: Any) -> tuple[dict[str, Any], int]:
                 "error": {"code": "bad_request", "message": "object required",
                           "details": {}}}, 400
 
-    model_payload = payload.get("model")
-    if model_payload is None:
-        model_payload = {k: v for k, v in payload.items() if k != "events"}
-    events_payload = payload.get("events")
+    model_payload, events_payload, canonical = _split_payload(payload)
     audit_id = model_payload.get("audit_id") if isinstance(
         model_payload, dict) else None
 
@@ -55,7 +69,7 @@ def _run(payload: Any) -> tuple[dict[str, Any], int]:
         body = _invalid_model(exc, audit_id if isinstance(audit_id, str)
                               else None)
         if isinstance(audit_id, str) and audit_id.strip():
-            body = store.submit(audit_id.strip(), payload, body,
+            body = store.submit(audit_id.strip(), canonical, body,
                                 model_valid=False)
             if body.get("status") == "conflict":
                 return body, 409
@@ -65,13 +79,13 @@ def _run(payload: Any) -> tuple[dict[str, Any], int]:
         events = parse_capture(events_payload)
     except ModelError as exc:
         body = _invalid_model(exc, model.audit_id)
-        body = store.submit(model.audit_id, payload, body, model_valid=False)
+        body = store.submit(model.audit_id, canonical, body, model_valid=False)
         if body.get("status") == "conflict":
             return body, 409
         return body, 422
 
     result = review(model, events)
-    stored = store.submit(model.audit_id, payload, result, model_valid=True)
+    stored = store.submit(model.audit_id, canonical, result, model_valid=True)
     code = 409 if stored.get("status") == "conflict" else 200
     return stored, code
 
